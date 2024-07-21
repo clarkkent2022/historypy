@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # -*- coding: utf-8 -*-
 """
 
@@ -70,10 +72,10 @@ from openai import OpenAI
 if 'OPENAI_API_KEY' in os.environ:
     llm_api_key = os.environ["OPENAI_API_KEY"]
     client = OpenAI(api_key=llm_api_key)
-    logging.debug("OPENAI_API_KEY found")
+    logging.info("OPENAI_API_KEY found")
 else:
-    logging.critical("Expected to find LLM_API_KEY environment variable, not found, so stopping")
-
+    logging.critical("Expected to find OPENAI_API_KEY environment variable, not found, so stopping")
+    sys.exit("You need to set a valid API key as the environment variable OPENAI_API_KEY")
 
 from llama_index.llms.openai import OpenAI
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, SummaryIndex, StorageContext, load_index_from_storage
