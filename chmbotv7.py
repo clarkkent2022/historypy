@@ -23,7 +23,8 @@ the stores in the vectorpersist and summarypersist directories will be used.
 #
 import os, sys, argparse, logging, readline
 
-parser = argparse.ArgumentParser(description="""
+parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter,
+    description="""
         Thank you for trying HistoryBot, a prototype chat bot designed to provide an interactive
         experience for those researching or interested in computer history. In History Bot's current
         experimental configuration the only source document used is a Computer History Museum docent's
@@ -31,27 +32,26 @@ parser = argparse.ArgumentParser(description="""
         script includes details on a range of important computers from history such as ENIAC and the 
         IBM 360.
 
-        With funding I'd look to expand the History Bot to include the many personal histories collected
-        by the museum and currently archived in either PDF or video format. 
-
-        This script needs three input arguments, first the LLM to use (right now
-        this is ignored, I always use gpt-4-turbo-preview). Next a 0 or 1 is required
-        to indicate if we should use the existing vector stores. A '1' says use the persisted vector store 
-        and '0' tells History Bot to rebuild the vector indexes. 
-        
-        This script also assumes the existence of an environment variable LLM_API_KEY
+        This script also assumes the existence of an environment variable OPENAI_API_KEY
         that obviously contains your API key for the LLM.
-        
-        In command line script mode just enter:
-        python3 chmbotv6routsl.py chatgpt 1
 
-        Richard Sawey TECH16 March 2024
+        This is a simple example of Agentic RAG, and uses a simple Llamaindex router to either query
+        the source documents directly or to summarize the documents. First created as part of my
+        Stanford TECH16 LLMs for Business class, this code is based on DeepLeaning.AI's course,
+        'Building Agentic RAG with Llamaindex':
+        https://learn.deeplearning.ai/courses/building-agentic-rag-with-llamaindex/
+
+        Richard Sawey  March 2024
         """)
 
 # Define optional switches with help messages
 parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
 # parser.add_argument("--config", "-c", type=str, help="Path to configuration file (optional)")
-parser.add_argument("--mode", "-m", choices=["train", "query"], type=str, default="query", help="Run mode (default: query) query will use existing vector store, train will (re)build)")
+parser.add_argument("--mode", "-m", choices=["train", "query"], type=str, default="query", 
+    help="Mode of 'query' (the default) will use existing sumary/vector stores, mode of 'train' will (re)build) these stores")
+parser.add_argument("--sources", "-s", type=str, default="./History",
+    help="Path to source documents (required if mode of 'train' invoked, default is History subdirectory). Ensure directory only contains documents you want fed into the beast.")
+parser.add_argument("--viewnodes", "-vn", action="store_true", help="View document nodes")
 
 # Parse arguments
 args = parser.parse_args()
@@ -62,8 +62,6 @@ if args.verbose:
     logging.debug("Verbose mode enabled")
 else:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-
-
 
 #
 # get API keys
@@ -77,17 +75,15 @@ else:
     logging.critical("Expected to find LLM_API_KEY environment variable, not found, so stopping")
 
 
-
 from llama_index.llms.openai import OpenAI
 from llama_index.core import VectorStoreIndex, Settings, SimpleDirectoryReader, SummaryIndex, StorageContext, load_index_from_storage
 from llama_index.embeddings.openai import OpenAIEmbedding
 
-
 #
 # Change to chatgpt 4 from LlamaIndex default of 3.5
 #
-Settings.llm = OpenAI(temperature=0, model_name='gpt-4-turbo-preview', api_key=llm_api_key)
-llm = OpenAI(temperature=0, model_name='gpt-4-turbo-preview', api_key=llm_api_key)
+# Settings.llm = OpenAI(temperature=0, model_name='gpt-4-turbo-preview', api_key=llm_api_key)
+llm = OpenAI(temperature=0, model_name='gpt-4o', api_key=llm_api_key)
 
 #
 #  index the supplied documents using llama_index and create a persistent index store
@@ -99,8 +95,6 @@ from llama_index.core.node_parser import (
 )
 from llama_index.embeddings.openai import OpenAIEmbedding
 
-# USE_STORE=os.environ["BOT_USE_STORE"]
-
 if args.mode == "query":
     #
     # Use the already created vector db
@@ -111,20 +105,32 @@ if args.mode == "query":
     summary_index = load_index_from_storage(storage_summary_context)
 else:
     #
-    # Generate new vector db of source material
+    # Input mode must be 'train' so generate new vector dbs of source material
     #
     #documents = SimpleDirectoryReader("./History").load_data()
+    #
+    # get document(s)
+    #
     documents = SimpleDirectoryReader(input_files=["./Tourv5.pdf"]).load_data()
-    embed_model = OpenAIEmbedding()
+    embed_model = OpenAIEmbedding("text-embedding-3-small")
+    #
+    # split docs up into nodes
+    #
     splitter = SemanticSplitterNodeParser(
         buffer_size=1, breakpoint_percentile_threshold=95, embed_model=embed_model
     )
     nodes = splitter.get_nodes_from_documents(documents, show_progress=False)
     print(nodes[5].get_content())
 
+    #
+    # Feed nodes into summary indexer
+    #
     summary_index = SummaryIndex(nodes)
     summary_index.storage_context.persist(persist_dir="./summarypersist")
     
+    #
+    # Feed nodes into vector db
+    #
     vector_index = VectorStoreIndex(nodes)
     vector_index.storage_context.persist(persist_dir="./vectorpersist")
 
@@ -134,6 +140,17 @@ summary_query_engine = summary_index.as_query_engine(
     use_async=True, llm=llm
 )
 vector_query_engine = vector_index.as_query_engine(llm=llm)
+
+logging.info(type(summary_index.ref_doc_info))
+if args.viewnodes:
+    sum_nodes = summary_index.ref_doc_info
+    logging.info(sum_nodes)
+
+#    for key, value in sum_nodes:
+#        logging.debug(f'Key: {key}, Value: {value}')
+#        logging.debug()
+#        logging.debug('=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-')
+#        logging.debug()
 
 
 from llama_index.core.query_engine import RouterQueryEngine
